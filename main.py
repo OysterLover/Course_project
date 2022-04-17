@@ -1,26 +1,24 @@
 import json
-
 import requests
 from pprint import pprint
-
-
-with open('token_vk.txt', 'r') as f:
-    token_vk = f.read().strip()
-
-with open('token_ya.txt', 'r') as f:
-    token_ya = f.read().strip()
 
 
 class VkUser:
     url = 'https://api.vk.com/method/'
 
-    def __init__(self, token, version):
+    def __init__(self, version):
+        with open('token_vk.txt', 'r') as f:
+            token = f.read().strip()
         self.params = {
             'access_token': token,
             'v': version
         }
 
-    def get_photos(self, user_id=None):
+        with open('token_ya.txt', 'r') as f:
+            token_ya = f.read().strip()
+        self.token_ya = token_ya
+
+    def get_photos(self, pic_num, user_id=None):
         photos_url = self.url + 'photos.get'
         photos_params = {
             'user_id': user_id,
@@ -28,82 +26,87 @@ class VkUser:
             'extended': 1,
             'feed_type': 'photo',
             'photo_sizes': 1,
-            'count': 5
+            'count': pic_num
         }
         res = requests.get(photos_url, params={**self.params, **photos_params}).json()
+
+        items = res['response']['items']
         photos_links = []
-        likes = []
-        for i in range(photos_params['count']):
-            sizes = res['response']['items'][i]['sizes']
-            for item in sizes:
-                if 'w' in item.values():
-                    photos_links.append(item['url'])
-                    likes.append(res['response']['items'][i]['likes']['count'])
-                # elif 'z' in item.values():
-                #     photos_links.append(item['url'])
-                #     likes.append(res['response']['items'][i]['likes']['count'])
-                # Почему-то, когда я ввожу проверку на другие разрешения фото (на случай, если самого лучшего нет), например,
-                # если нет w, то проверяю,есть ли z и т.д. Даже введение еще одного уровня elif приводит к ошибке:
-                # counter out of range. Буду рада, если вы мне поможете.
+        names = []
+        sizes_list = []
+        for pic_info in items:
 
+            height_list = []
 
+            for size in pic_info['sizes']:
+                height_list.append(size['height'])
 
+            for size in pic_info['sizes']:
+                if size['height'] == max(height_list):  # succeeds always
+                    photos_links.append(size['url'])
+                    sizes_list.append(size['type'])
+                    if str(pic_info['likes']['count']) not in names:
+                        names.append(str(pic_info['likes']['count']))
+                    else:
+                        names.append(f"{str(pic_info['likes']['count'])}_{str(pic_info['date'])}")
+
+        json_dict = []
         counter = 0
 
-        info_file_content = [{}, {}, {}, {}, {}]
+        while counter != pic_num:
+            json_dict.append({})
+            json_dict[counter]['file_name'] = f'{names[counter]}.jpg'
+            json_dict[counter]['size'] = sizes_list[counter]
 
-        for pic in photos_links:
-
-            img = requests.get(pic)
-            with open(f'photos_storage/{likes[counter]}.jpg', "wb") as file:
-                file.write(img.content)
-            info_file_content[counter]['file_name'] = f'{likes[counter]}.jpg'
-            info_file_content[counter]['size'] = 'w'
             counter += 1
 
         with open('info.json', 'w') as file:
-            json.dump(info_file_content, file)
+            json.dump(json_dict, file)
 
-        return photos_links, likes, info_file_content
+        return photos_links
 
-
-class YaUploader:
-    def __init__(self, token):
-        self.token = token
-
-    def get_headers(self):
+    def get_headers_yadisk(self):
         return {
             'Content-Type': 'application/json',
-            'Authorization': 'OAuth {}'.format(self.token)
+            'Authorization': 'OAuth {}'.format(self.token_ya)
         }
 
-
-    def get_upload_link(self, disk_file_path):
-        upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
-        headers = self.get_headers()
-        params = {'path': disk_file_path, 'overwrite': 'false'}
-        response = requests.get(upload_url, headers=headers, params=params)
-        pprint(response.json())
-        return response.json()
+    def upload_to_yadisk(self):
+        user_id = input('Input user_id:')
 
 
-    def upload(self, file_path, disk_file_path):
-        href_json = self.get_upload_link(disk_file_path=disk_file_path)
-        href = href_json['href']
-        response = requests.put(href, data=open(file_path, 'rb'))
-        response.raise_for_status()
-        if response.status_code == 201:
-            print('Success')
 
 
-vk_client = VkUser(token_vk, '5.131')
-vk_client.get_photos()
+        disk_folder = input('Input yaDisk folder name:')
+        photo_count = int(input('Input number of photos you want to save:'))
+        upload_url = f'https://cloud-api.yandex.net/v1/disk/resources?path={disk_folder}'
+        headers = self.get_headers_yadisk()
+        response = requests.get(upload_url, headers=headers)
+        res = response.json()
 
-with open('info.json') as file:
-    pic_data = json.load(file)
+        if 'Resource not found.' in res.values():
+            requests.put(upload_url, headers=headers)
+        else:
+            pass
+
+        counter = 0
+        for url in self.get_photos(pic_num=photo_count, user_id=user_id):
+
+            upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
+            headers = self.get_headers_yadisk()
+
+            with open('info.json', 'r') as file:
+                pic_info = json.load(file)
+
+            params = {'path': f"{disk_folder}/{pic_info[counter]['file_name']}", 'overwrite': 'false', 'url': url}
+            response = requests.post(upload_url, headers=headers, params=params)
+            response.raise_for_status()
+
+            print(f"{round((counter / photo_count) * 100)} % done")
+            counter += 1
+        print('100 % done - Success!')
 
 
-uploader = YaUploader(token_ya)
-
-for pic in pic_data:
-    uploader.upload(f"photos_storage/{pic['file_name']}", f"course_project/{pic['file_name']}")
+if __name__ == "__main__":
+    vk_client = VkUser('5.131')
+    vk_client.upload_to_yadisk()
