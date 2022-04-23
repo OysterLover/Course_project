@@ -1,6 +1,5 @@
 import json
 import requests
-from pprint import pprint
 
 
 class VkUser:
@@ -39,16 +38,30 @@ class VkUser:
             height_list = []
 
             for size in pic_info['sizes']:
-                height_list.append(size['height'])
+                if size['height'] not in height_list:
+                    height_list.append(size['height'])
+                else:
+                    pass
 
             for size in pic_info['sizes']:
                 if size['height'] == max(height_list):  # succeeds always
-                    photos_links.append(size['url'])
-                    sizes_list.append(size['type'])
-                    if str(pic_info['likes']['count']) not in names:
-                        names.append(str(pic_info['likes']['count']))
+                    if size['height'] != 0:
+                        photos_links.append(size['url'])
+                        sizes_list.append(size['type'])
+                        if str(pic_info['likes']['count']) not in names:
+                            names.append(str(pic_info['likes']['count']))
+                        else:
+                            names.append(f"{str(pic_info['likes']['count'])}_{str(pic_info['date'])}")
                     else:
-                        names.append(f"{str(pic_info['likes']['count'])}_{str(pic_info['date'])}")
+                        if pic_info['sizes'][-1]['url'] not in photos_links:
+                            photos_links.append(pic_info['sizes'][-1]['url'])
+                            sizes_list.append(pic_info['sizes'][-1]['type'])
+                            if str(pic_info['likes']['count']) not in names:
+                                names.append(str(pic_info['likes']['count']))
+                            else:
+                                names.append(f"{str(pic_info['likes']['count'])}_{str(pic_info['date'])}")
+                        else:
+                            pass
 
         json_dict = []
         counter = 0
@@ -72,10 +85,18 @@ class VkUser:
         }
 
     def upload_to_yadisk(self):
-        user_id = input('Input user_id:')
+        user_id = input('Input user id or screen name:')
 
+        if not user_id.isdigit():
+            info_url = self.url + 'users.get'
+            info_params = {
+                'user_ids': user_id
+            }
 
-
+            res = requests.get(info_url, params={**self.params, **info_params}).json()
+            user_id = res['response'][0]['id']
+        else:
+            pass
 
         disk_folder = input('Input yaDisk folder name:')
         photo_count = int(input('Input number of photos you want to save:'))
@@ -91,7 +112,6 @@ class VkUser:
 
         counter = 0
         for url in self.get_photos(pic_num=photo_count, user_id=user_id):
-
             upload_url = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
             headers = self.get_headers_yadisk()
 
